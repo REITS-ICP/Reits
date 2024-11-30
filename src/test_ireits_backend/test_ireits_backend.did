@@ -63,6 +63,24 @@ type Collection = record {
     treasury: principal;
 };
 
+type TransferArgs = record {
+    spender_subaccount: opt blob;
+    from: principal;
+    to: principal;
+    token_id: nat64;
+    memo: opt blob;
+    created_at_time: opt nat64;
+};
+
+type ApprovalArgs = record {
+    from_subaccount: opt blob;
+    spender: principal;
+    token_id: nat64;
+    expires_at: opt nat64;
+    memo: opt blob;
+    created_at_time: opt nat64;
+};
+
 type PaymentError = record {
     kind: variant {
         InsufficientBalance;
@@ -91,7 +109,9 @@ service : {
     total_supply: () -> (nat64) query;
     owner_of: (token_id: nat64) -> (opt principal) query;
     balance_of: (owner: principal) -> (nat64) query;
-    transfer: (to: principal, token_id: nat64) -> (variant { Ok: bool; Err: text });
+    transfer: (TransferArgs) -> (variant { Ok: bool; Err: text });
+    approve: (ApprovalArgs) -> (variant { Ok: bool; Err: text });
+    get_approved: (token_id: nat64) -> (opt record { principal; opt nat64 }) query;
     
     // Property Token Management
     initialize_collection: (name: text, symbol: text, description: text, royalties: nat16, treasury: principal) -> (bool);
@@ -112,8 +132,7 @@ service : {
     ) -> (opt nat64);
     
     // Rental Income Distribution
-    distribute_rental_income: (property_id: nat64) -> (bool);
-    distribute_token_income: (token_id: nat64, total_amount: nat64, use_usdt: bool) -> (variant { Ok: bool; Err: text });
+    distribute_token_income: (total_amount: nat64, use_usdt: bool) -> (variant { Ok: bool; Err: text });
     
     // Payment Management
     initialize_payment_manager: (ckusdc_id: principal, ckusdt_id: principal) -> ();

@@ -24,6 +24,16 @@
           "ic": "rdmx6-jaaaa-aaaaa-aaadq-cai"
         }
       }
+    },
+    "mock_usdc": {
+      "candid": "src/mock_ledger/mock_ledger.did",
+      "package": "mock_ledger",
+      "type": "rust"
+    },
+    "mock_usdt": {
+      "candid": "src/mock_ledger/mock_ledger.did",
+      "package": "mock_ledger",
+      "type": "rust"
     }
   },
   "defaults": {

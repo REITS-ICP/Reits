@@ -1,0 +1,4 @@
+service : {
+    "icrc1_transfer": (principal, principal, nat64) -> (bool);
+    "icrc1_balance_of": (principal) -> (nat64) query;
+} 

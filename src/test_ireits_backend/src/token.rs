@@ -1,34 +1,33 @@
 use candid::{CandidType, Deserialize, Principal};
 use ic_cdk::api::caller as ic_caller;
-use serde::Serialize;
+use ic_cdk::api::time;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
-use crate::payments::{PaymentManager, PaymentError};
-
-#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
+// ICRC-7 Types
+#[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct TokenMetadata {
     pub name: String,
     pub symbol: String,
     pub description: Option<String>,
     pub image: Option<Vec<u8>>,
-    pub royalties: Option<u16>, // basis points (e.g., 250 = 2.5%)
+    pub royalties: Option<u16>,
     pub royalty_recipient: Option<Principal>,
 }
 
-#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
+#[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct PropertyToken {
     pub token_id: u64,
     pub owner: Principal,
     pub metadata: TokenMetadata,
     pub property_id: u64,
     pub total_supply: u64,
-    pub price_per_token: u64, // in cKUSDC/cKUSDT
+    pub price_per_token: u64,
     pub available_supply: u64,
-    pub use_usdt: bool, // true for USDT, false for USDC
+    pub use_usdt: bool,
 }
 
-#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
+#[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct Collection {
     pub name: String,
     pub symbol: String,
@@ -39,137 +38,183 @@ pub struct Collection {
     pub treasury: Principal,
 }
 
-thread_local! {
-    static TOKENS: RefCell<HashMap<u64, PropertyToken>> = RefCell::new(HashMap::new());
-    static TOKEN_OWNERS: RefCell<HashMap<Principal, HashSet<u64>>> = RefCell::new(HashMap::new());
-    static COLLECTION: RefCell<Option<Collection>> = RefCell::new(None);
-    static TOKEN_COUNTER: RefCell<u64> = RefCell::new(0);
-    static PAYMENT_MANAGER: RefCell<Option<PaymentManager>> = RefCell::new(None);
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct TransferArgs {
+    pub spender_subaccount: Option<Vec<u8>>,
+    pub from: Principal,
+    pub to: Principal,
+    pub token_id: u64,
+    pub memo: Option<Vec<u8>>,
+    pub created_at_time: Option<u64>,
 }
 
-pub fn initialize_payment_manager(ckusdc_id: Principal, ckusdt_id: Principal) {
-    PAYMENT_MANAGER.with(|manager| {
-        *manager.borrow_mut() = Some(PaymentManager::new(ckusdc_id, ckusdt_id));
-    });
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct ApprovalArgs {
+    pub from_subaccount: Option<Vec<u8>>,
+    pub spender: Principal,
+    pub token_id: u64,
+    pub expires_at: Option<u64>,
+    pub memo: Option<Vec<u8>>,
+    pub created_at_time: Option<u64>,
+}
+
+thread_local! {
+    static COLLECTION: RefCell<Option<Collection>> = RefCell::new(None);
+    static TOKENS: RefCell<HashMap<u64, PropertyToken>> = RefCell::new(HashMap::new());
+    static TOKEN_OWNERS: RefCell<HashMap<Principal, HashSet<u64>>> = RefCell::new(HashMap::new());
+    static APPROVALS: RefCell<HashMap<(Principal, u64), (Principal, Option<u64>)>> = RefCell::new(HashMap::new());
+    static TOKEN_COUNTER: RefCell<u64> = RefCell::new(0);
 }
 
 // ICRC-7 Standard Implementation
 pub mod icrc7 {
     use super::*;
 
-    #[ic_cdk::query]
     pub fn name() -> String {
-        COLLECTION.with(|collection| {
-            collection
-                .borrow()
+        COLLECTION.with(|c| {
+            c.borrow()
                 .as_ref()
-                .expect("Collection not initialized")
-                .name
-                .clone()
+                .map(|c| c.name.clone())
+                .unwrap_or_else(|| "".to_string())
         })
     }
 
-    #[ic_cdk::query]
     pub fn symbol() -> String {
-        COLLECTION.with(|collection| {
-            collection
-                .borrow()
+        COLLECTION.with(|c| {
+            c.borrow()
                 .as_ref()
-                .expect("Collection not initialized")
-                .symbol
-                .clone()
+                .map(|c| c.symbol.clone())
+                .unwrap_or_else(|| "".to_string())
         })
     }
 
-    #[ic_cdk::query]
     pub fn total_supply() -> u64 {
-        COLLECTION.with(|collection| {
-            collection
-                .borrow()
-                .as_ref()
-                .expect("Collection not initialized")
-                .total_supply
-        })
+        COLLECTION.with(|c| c.borrow().as_ref().map(|c| c.total_supply).unwrap_or(0))
     }
 
-    #[ic_cdk::query]
     pub fn owner_of(token_id: u64) -> Option<Principal> {
-        TOKENS.with(|tokens| tokens.borrow().get(&token_id).map(|token| token.owner))
+        TOKENS.with(|tokens| tokens.borrow().get(&token_id).map(|t| t.owner))
     }
 
-    #[ic_cdk::query]
     pub fn balance_of(owner: Principal) -> u64 {
         TOKEN_OWNERS.with(|owners| {
             owners
                 .borrow()
                 .get(&owner)
-                .map_or(0, |tokens| tokens.len() as u64)
+                .map(|tokens| tokens.len() as u64)
+                .unwrap_or(0)
         })
     }
 
-    #[ic_cdk::update]
-    pub async fn transfer(to: Principal, token_id: u64) -> Result<bool, String> {
+    pub fn transfer(args: TransferArgs) -> Result<bool, String> {
         let caller = ic_caller();
         
+        // Verify ownership or approval
+        if args.from != caller {
+            let is_approved = APPROVALS.with(|approvals| {
+                approvals
+                    .borrow()
+                    .get(&(args.from, args.token_id))
+                    .map(|(approved_spender, expires_at)| {
+                        caller == *approved_spender
+                            && expires_at
+                                .map(|exp| exp > time())
+                                .unwrap_or(true)
+                    })
+                    .unwrap_or(false)
+            });
+
+            if !is_approved {
+                return Err("Not authorized to transfer".to_string());
+            }
+        }
+
+        // Update token ownership
         TOKENS.with(|tokens| {
-            let mut tokens_ref = tokens.borrow_mut();
-            if let Some(token) = tokens_ref.get_mut(&token_id) {
-                if token.owner != caller {
-                    return Err("Not token owner".to_string());
+            let mut tokens = tokens.borrow_mut();
+            if let Some(token) = tokens.get_mut(&args.token_id) {
+                if token.owner != args.from {
+                    return Err("Token not owned by sender".to_string());
                 }
-
-                // Handle royalties if configured
-                if let Some(royalties) = token.metadata.royalties {
-                    if let Some(recipient) = token.metadata.royalty_recipient {
-                        let royalty_amount = (token.price_per_token * royalties as u64) / 10000;
-                        
-                        // Process royalty payment
-                        PAYMENT_MANAGER.with(|manager| {
-                            if let Some(manager) = manager.borrow().as_ref() {
-                                if let Err(e) = ic_cdk::block_on(manager.process_payment(
-                                    to,
-                                    recipient,
-                                    royalty_amount,
-                                    token.use_usdt,
-                                )) {
-                                    return Err(format!("Royalty payment failed: {}", e.message));
-                                }
-                            }
-                        });
-                    }
-                }
-
-                token.owner = to;
-                
-                // Update token owners
-                TOKEN_OWNERS.with(|owners| {
-                    let mut owners_ref = owners.borrow_mut();
-                    
-                    // Remove from previous owner
-                    if let Some(caller_tokens) = owners_ref.get_mut(&caller) {
-                        caller_tokens.remove(&token_id);
-                    }
-                    
-                    // Add to new owner
-                    owners_ref
-                        .entry(to)
-                        .or_insert_with(HashSet::new)
-                        .insert(token_id);
-                });
-                
-                Ok(true)
+                token.owner = args.to;
+                Ok(())
             } else {
                 Err("Token not found".to_string())
             }
-        })
+        })?;
+
+        // Update owner records
+        TOKEN_OWNERS.with(|owners| {
+            let mut owners = owners.borrow_mut();
+            
+            // Remove from previous owner
+            if let Some(owned_tokens) = owners.get_mut(&args.from) {
+                owned_tokens.remove(&args.token_id);
+            }
+            
+            // Add to new owner
+            owners
+                .entry(args.to)
+                .or_insert_with(HashSet::new)
+                .insert(args.token_id);
+        });
+
+        // Clear approval if exists
+        APPROVALS.with(|approvals| {
+            approvals.borrow_mut().remove(&(args.from, args.token_id));
+        });
+
+        Ok(true)
+    }
+
+    pub fn approve(args: ApprovalArgs) -> Result<bool, String> {
+        let caller = ic_caller();
+        
+        // Verify ownership
+        let owns_token = TOKENS.with(|tokens| {
+            tokens
+                .borrow()
+                .get(&args.token_id)
+                .map(|t| t.owner == caller)
+                .unwrap_or(false)
+        });
+
+        if !owns_token {
+            return Err("Not token owner".to_string());
+        }
+
+        // Set approval
+        APPROVALS.with(|approvals| {
+            approvals
+                .borrow_mut()
+                .insert((caller, args.token_id), (args.spender, args.expires_at));
+        });
+
+        Ok(true)
+    }
+
+    pub fn get_approved(token_id: u64) -> Option<(Principal, Option<u64>)> {
+        let owner = owner_of(token_id)?;
+        APPROVALS.with(|approvals| approvals.borrow().get(&(owner, token_id)).cloned())
     }
 }
 
 // Property Token Management
 pub mod management {
     use super::*;
+    use crate::payments::PaymentManager;
+    use std::cell::RefCell;
 
-    #[ic_cdk::update]
+    thread_local! {
+        static PAYMENT_MANAGER: RefCell<Option<PaymentManager>> = RefCell::new(None);
+    }
+
+    pub fn initialize_payment_manager(usdc_ledger: Principal, usdt_ledger: Principal) {
+        PAYMENT_MANAGER.with(|manager| {
+            *manager.borrow_mut() = Some(PaymentManager::new(usdc_ledger, usdt_ledger));
+        });
+    }
+
     pub fn initialize_collection(
         name: String,
         symbol: String,
@@ -198,64 +243,55 @@ pub mod management {
         })
     }
 
-    #[ic_cdk::update]
-    pub fn mint_property_token(
-        property_id: u64,
+    pub fn mint_token(
+        owner: Principal,
         metadata: TokenMetadata,
+        property_id: u64,
         total_supply: u64,
         price_per_token: u64,
         use_usdt: bool,
     ) -> Option<u64> {
-        let caller = ic_caller();
-        
-        COLLECTION.with(|collection| {
-            let mut coll = collection.borrow_mut();
-            let coll = coll.as_mut()?;
-            
-            if coll.owner != caller {
-                return None;
-            }
-            
-            TOKEN_COUNTER.with(|counter| {
-                let mut count = counter.borrow_mut();
-                *count += 1;
-                let token_id = *count;
-                
-                let token = PropertyToken {
-                    token_id,
-                    owner: caller,
-                    metadata,
-                    property_id,
-                    total_supply,
-                    price_per_token,
-                    available_supply: total_supply,
-                    use_usdt,
-                };
-                
-                TOKENS.with(|tokens| {
-                    tokens.borrow_mut().insert(token_id, token);
-                });
-                
-                TOKEN_OWNERS.with(|owners| {
-                    owners
-                        .borrow_mut()
-                        .entry(caller)
-                        .or_insert_with(HashSet::new)
-                        .insert(token_id);
-                });
-                
-                coll.total_supply += 1;
-                Some(token_id)
-            })
+        TOKEN_COUNTER.with(|counter| {
+            let token_id = *counter.borrow() + 1;
+            *counter.borrow_mut() = token_id;
+
+            let token = PropertyToken {
+                token_id,
+                owner,
+                metadata,
+                property_id,
+                total_supply,
+                price_per_token,
+                available_supply: total_supply,
+                use_usdt,
+            };
+
+            TOKENS.with(|tokens| {
+                tokens.borrow_mut().insert(token_id, token);
+            });
+
+            TOKEN_OWNERS.with(|owners| {
+                owners
+                    .borrow_mut()
+                    .entry(owner)
+                    .or_insert_with(HashSet::new)
+                    .insert(token_id);
+            });
+
+            COLLECTION.with(|collection| {
+                if let Some(ref mut c) = *collection.borrow_mut() {
+                    c.total_supply += 1;
+                }
+            });
+
+            Some(token_id)
         })
     }
 
-    #[ic_cdk::query]
     pub fn get_token(token_id: u64) -> Option<PropertyToken> {
         TOKENS.with(|tokens| tokens.borrow().get(&token_id).cloned())
     }
 
-    #[ic_cdk::query]
     pub fn get_user_tokens(user: Principal) -> Vec<PropertyToken> {
         TOKEN_OWNERS.with(|owners| {
             if let Some(token_ids) = owners.borrow().get(&user) {
@@ -273,82 +309,49 @@ pub mod management {
         })
     }
 
-    #[ic_cdk::update]
-    pub async fn purchase_tokens(token_id: u64, amount: u64) -> Result<bool, String> {
+    pub async fn purchase_tokens(
+        token_id: u64,
+        amount: u64,
+    ) -> Result<bool, String> {
         let caller = ic_caller();
         
-        TOKENS.with(|tokens| {
-            let mut tokens_ref = tokens.borrow_mut();
-            if let Some(token) = tokens_ref.get_mut(&token_id) {
-                if token.available_supply < amount {
-                    return Err("Insufficient available supply".to_string());
-                }
-                
-                let total_cost = token.price_per_token * amount;
-                
-                // Process payment
-                PAYMENT_MANAGER.with(|manager| {
-                    if let Some(manager) = manager.borrow().as_ref() {
-                        // Get treasury address from collection
-                        let treasury = COLLECTION.with(|collection| {
-                            collection.borrow().as_ref()
-                                .map(|c| c.treasury)
-                                .ok_or("Collection not initialized".to_string())
-                        })?;
+        // Get token details
+        let (price_per_token, use_usdt, owner) = TOKENS.with(|tokens| {
+            tokens.borrow().get(&token_id).map(|t| {
+                (t.price_per_token, t.use_usdt, t.owner)
+            }).ok_or("Token not found".to_string())
+        })?;
 
-                        if let Err(e) = ic_cdk::block_on(manager.process_payment(
-                            caller,
-                            treasury,
-                            total_cost,
-                            token.use_usdt,
-                        )) {
-                            return Err(format!("Payment failed: {}", e.message));
-                        }
-                    } else {
-                        return Err("Payment manager not initialized".to_string());
+        let total_price = price_per_token * amount;
+
+        // Process payment
+        if let Some(manager) = PAYMENT_MANAGER.with(|m| m.borrow().as_ref().cloned()) {
+            manager.process_payment(
+                caller,
+                owner,
+                total_price,
+                use_usdt,
+            ).await.map_err(|e| e.message)?;
+
+            // Update token supply
+            TOKENS.with(|tokens| {
+                let mut tokens = tokens.borrow_mut();
+                if let Some(token) = tokens.get_mut(&token_id) {
+                    if token.available_supply < amount {
+                        return Err("Insufficient available supply".to_string());
                     }
-                });
-                
-                token.available_supply -= amount;
-                
-                // Create new token for the buyer
-                TOKEN_COUNTER.with(|counter| {
-                    let mut count = counter.borrow_mut();
-                    *count += 1;
-                    let new_token_id = *count;
-                    
-                    let new_token = PropertyToken {
-                        token_id: new_token_id,
-                        owner: caller,
-                        metadata: token.metadata.clone(),
-                        property_id: token.property_id,
-                        total_supply: amount,
-                        price_per_token: token.price_per_token,
-                        available_supply: amount,
-                        use_usdt: token.use_usdt,
-                    };
-                    
-                    tokens_ref.insert(new_token_id, new_token);
-                    
-                    TOKEN_OWNERS.with(|owners| {
-                        owners
-                            .borrow_mut()
-                            .entry(caller)
-                            .or_insert_with(HashSet::new)
-                            .insert(new_token_id);
-                    });
-                });
-                
-                Ok(true)
-            } else {
-                Err("Token not found".to_string())
-            }
-        })
+                    token.available_supply -= amount;
+                }
+                Ok(())
+            })?;
+
+            Ok(true)
+        } else {
+            Err("Payment manager not initialized".to_string())
+        }
     }
 
-    #[ic_cdk::update]
     pub async fn distribute_token_income(
-        token_id: u64,
         total_amount: u64,
         use_usdt: bool,
     ) -> Result<bool, String> {
@@ -359,13 +362,17 @@ pub mod management {
             let mut distributions = Vec::new();
             let owners_ref = owners.borrow();
             
+            let total_supply: u64 = TOKENS.with(|tokens| {
+                tokens.borrow().values().map(|t| t.total_supply).sum()
+            });
+            
             for (owner, tokens) in owners_ref.iter() {
                 let owner_amount = tokens.iter()
                     .filter_map(|tid| TOKENS.with(|t| t.borrow().get(tid).map(|token| token.total_supply)))
                     .sum::<u64>();
                 
                 if owner_amount > 0 {
-                    let proportion = (owner_amount as f64) / (total_amount as f64);
+                    let proportion = (owner_amount as f64) / (total_supply as f64);
                     let distribution_amount = (total_amount as f64 * proportion) as u64;
                     distributions.push((*owner, distribution_amount));
                 }
@@ -375,19 +382,15 @@ pub mod management {
         });
 
         // Process distributions
-        PAYMENT_MANAGER.with(|manager| {
-            if let Some(manager) = manager.borrow().as_ref() {
-                if let Err(e) = ic_cdk::block_on(manager.distribute_income(
-                    caller,
-                    distributions,
-                    use_usdt,
-                )) {
-                    return Err(format!("Distribution failed: {}", e.message));
-                }
-                Ok(true)
-            } else {
-                Err("Payment manager not initialized".to_string())
-            }
-        })
+        if let Some(manager) = PAYMENT_MANAGER.with(|m| m.borrow().as_ref().cloned()) {
+            manager.distribute_income(
+                caller,
+                distributions,
+                use_usdt,
+            ).await.map_err(|e| e.message)?;
+            Ok(true)
+        } else {
+            Err("Payment manager not initialized".to_string())
+        }
     }
 } 
