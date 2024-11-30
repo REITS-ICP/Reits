@@ -4,15 +4,24 @@ use ic_cdk::api::time;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
-// ICRC-7 Types
+// Enhanced Token Metadata Types
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct TokenMetadata {
     pub name: String,
     pub symbol: String,
     pub description: Option<String>,
+    pub logo: Option<Vec<u8>>,
+    pub content_type: Option<String>, // e.g., "image/png", "image/jpeg"
+    pub decimals: u8,
+    pub website: Option<String>,
+    pub social_links: Option<Vec<String>>,
+    pub supply_cap: Option<u64>,
     pub image: Option<Vec<u8>>,
     pub royalties: Option<u16>,
     pub royalty_recipient: Option<Principal>,
+    pub tags: Option<Vec<String>>,
+    pub created_at: u64,
+    pub modified_at: u64,
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
@@ -22,9 +31,13 @@ pub struct PropertyToken {
     pub metadata: TokenMetadata,
     pub property_id: u64,
     pub total_supply: u64,
+    pub circulating_supply: u64,
     pub price_per_token: u64,
     pub available_supply: u64,
     pub use_usdt: bool,
+    pub holders: u64,
+    pub transfer_restricted: bool,
+    pub last_transfer: Option<u64>,
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
@@ -33,9 +46,23 @@ pub struct Collection {
     pub symbol: String,
     pub description: String,
     pub total_supply: u64,
+    pub max_supply: Option<u64>,
     pub royalties: u16,
     pub owner: Principal,
     pub treasury: Principal,
+    pub created_at: u64,
+    pub logo: Option<Vec<u8>>,
+    pub website: Option<String>,
+    pub social_links: Option<Vec<String>>,
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub struct TokenStats {
+    pub total_transactions: u64,
+    pub unique_holders: u64,
+    pub market_cap: u64,
+    pub volume_24h: u64,
+    pub price_change_24h: f64,
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
@@ -64,6 +91,7 @@ thread_local! {
     static TOKEN_OWNERS: RefCell<HashMap<Principal, HashSet<u64>>> = RefCell::new(HashMap::new());
     static APPROVALS: RefCell<HashMap<(Principal, u64), (Principal, Option<u64>)>> = RefCell::new(HashMap::new());
     static TOKEN_COUNTER: RefCell<u64> = RefCell::new(0);
+    static TOKEN_STATS: RefCell<HashMap<u64, TokenStats>> = RefCell::new(HashMap::new());
 }
 
 // ICRC-7 Standard Implementation
@@ -92,6 +120,10 @@ pub mod icrc7 {
         COLLECTION.with(|c| c.borrow().as_ref().map(|c| c.total_supply).unwrap_or(0))
     }
 
+    pub fn max_supply() -> Option<u64> {
+        COLLECTION.with(|c| c.borrow().as_ref().map(|c| c.max_supply).unwrap_or(None))
+    }
+
     pub fn owner_of(token_id: u64) -> Option<Principal> {
         TOKENS.with(|tokens| tokens.borrow().get(&token_id).map(|t| t.owner))
     }
@@ -104,6 +136,10 @@ pub mod icrc7 {
                 .map(|tokens| tokens.len() as u64)
                 .unwrap_or(0)
         })
+    }
+
+    pub fn get_token_stats(token_id: u64) -> Option<TokenStats> {
+        TOKEN_STATS.with(|stats| stats.borrow().get(&token_id).cloned())
     }
 
     pub fn transfer(args: TransferArgs) -> Result<bool, String> {
@@ -129,14 +165,27 @@ pub mod icrc7 {
             }
         }
 
-        // Update token ownership
+        // Update token ownership and stats
         TOKENS.with(|tokens| {
             let mut tokens = tokens.borrow_mut();
             if let Some(token) = tokens.get_mut(&args.token_id) {
                 if token.owner != args.from {
                     return Err("Token not owned by sender".to_string());
                 }
+                if token.transfer_restricted {
+                    return Err("Token transfers are restricted".to_string());
+                }
                 token.owner = args.to;
+                token.last_transfer = Some(time());
+                
+                // Update token stats
+                TOKEN_STATS.with(|stats| {
+                    let mut stats = stats.borrow_mut();
+                    if let Some(token_stats) = stats.get_mut(&args.token_id) {
+                        token_stats.total_transactions += 1;
+                    }
+                });
+                
                 Ok(())
             } else {
                 Err("Token not found".to_string())
@@ -197,6 +246,14 @@ pub mod icrc7 {
         let owner = owner_of(token_id)?;
         APPROVALS.with(|approvals| approvals.borrow().get(&(owner, token_id)).cloned())
     }
+
+    pub fn get_metadata(token_id: u64) -> Option<TokenMetadata> {
+        TOKENS.with(|tokens| tokens.borrow().get(&token_id).map(|t| t.metadata.clone()))
+    }
+
+    pub fn get_collection_info() -> Option<Collection> {
+        COLLECTION.with(|c| c.borrow().clone())
+    }
 }
 
 // Property Token Management
@@ -221,6 +278,10 @@ pub mod management {
         description: String,
         royalties: u16,
         treasury: Principal,
+        max_supply: Option<u64>,
+        logo: Option<Vec<u8>>,
+        website: Option<String>,
+        social_links: Option<Vec<String>>,
     ) -> bool {
         let caller = ic_caller();
         
@@ -234,9 +295,14 @@ pub mod management {
                 symbol,
                 description,
                 total_supply: 0,
+                max_supply,
                 royalties,
                 owner: caller,
                 treasury,
+                created_at: time(),
+                logo,
+                website,
+                social_links,
             });
             
             true
@@ -250,7 +316,15 @@ pub mod management {
         total_supply: u64,
         price_per_token: u64,
         use_usdt: bool,
+        transfer_restricted: bool,
     ) -> Option<u64> {
+        // Check max supply if set
+        if let Some(max_supply) = COLLECTION.with(|c| c.borrow().as_ref().map(|c| c.max_supply).unwrap_or(None)) {
+            if COLLECTION.with(|c| c.borrow().as_ref().map(|c| c.total_supply).unwrap_or(0)) + 1 > max_supply {
+                return None;
+            }
+        }
+
         TOKEN_COUNTER.with(|counter| {
             let token_id = *counter.borrow() + 1;
             *counter.borrow_mut() = token_id;
@@ -258,13 +332,32 @@ pub mod management {
             let token = PropertyToken {
                 token_id,
                 owner,
-                metadata,
+                metadata: TokenMetadata {
+                    created_at: time(),
+                    modified_at: time(),
+                    ..metadata
+                },
                 property_id,
                 total_supply,
+                circulating_supply: total_supply,
                 price_per_token,
                 available_supply: total_supply,
                 use_usdt,
+                holders: 1,
+                transfer_restricted,
+                last_transfer: None,
             };
+
+            // Initialize token stats
+            TOKEN_STATS.with(|stats| {
+                stats.borrow_mut().insert(token_id, TokenStats {
+                    total_transactions: 0,
+                    unique_holders: 1,
+                    market_cap: total_supply * price_per_token,
+                    volume_24h: 0,
+                    price_change_24h: 0.0,
+                });
+            });
 
             TOKENS.with(|tokens| {
                 tokens.borrow_mut().insert(token_id, token);
@@ -333,7 +426,7 @@ pub mod management {
                 use_usdt,
             ).await.map_err(|e| e.message)?;
 
-            // Update token supply
+            // Update token supply and stats
             TOKENS.with(|tokens| {
                 let mut tokens = tokens.borrow_mut();
                 if let Some(token) = tokens.get_mut(&token_id) {
@@ -341,6 +434,16 @@ pub mod management {
                         return Err("Insufficient available supply".to_string());
                     }
                     token.available_supply -= amount;
+                    token.holders += 1;
+                    
+                    // Update token stats
+                    TOKEN_STATS.with(|stats| {
+                        if let Some(token_stats) = stats.borrow_mut().get_mut(&token_id) {
+                            token_stats.total_transactions += 1;
+                            token_stats.unique_holders = token.holders;
+                            token_stats.volume_24h += total_price;
+                        }
+                    });
                 }
                 Ok(())
             })?;

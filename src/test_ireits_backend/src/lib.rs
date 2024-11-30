@@ -265,8 +265,69 @@ fn get_approved(token_id: u64) -> Option<(Principal, Option<u64>)> {
 
 // Property Token Management
 #[update]
-fn initialize_collection(name: String, symbol: String, description: String, royalties: u16, treasury: Principal) -> bool {
-    management::initialize_collection(name, symbol, description, royalties, treasury)
+fn initialize_collection(
+    name: String,
+    symbol: String,
+    description: String,
+    royalties: u16,
+    treasury: Principal,
+    max_supply: Option<u64>,
+    logo: Option<Vec<u8>>,
+    website: Option<String>,
+    social_links: Option<Vec<String>>,
+) -> bool {
+    management::initialize_collection(
+        name,
+        symbol,
+        description,
+        royalties,
+        treasury,
+        max_supply,
+        logo,
+        website,
+        social_links,
+    )
+}
+
+#[update]
+fn tokenize_property(
+    property_id: u64,
+    token_name: String,
+    token_symbol: String,
+    token_description: Option<String>,
+    total_supply: u64,
+    price_per_token: u64,
+    royalties: Option<u16>,
+) -> Option<u64> {
+    let caller = ic_caller();
+    let current_time = ic_cdk::api::time();
+
+    let metadata = token::TokenMetadata {
+        name: token_name,
+        symbol: token_symbol,
+        description: token_description,
+        logo: None,
+        content_type: None,
+        decimals: 0,
+        website: None,
+        social_links: None,
+        supply_cap: Some(total_supply),
+        image: None,
+        royalties,
+        royalty_recipient: Some(caller),
+        tags: Some(vec!["REIT".to_string(), "Property".to_string()]),
+        created_at: current_time,
+        modified_at: current_time,
+    };
+
+    mint_property_token(
+        property_id,
+        metadata,
+        total_supply,
+        price_per_token,
+        false,
+        false,
+    )
 }
 
 #[update]
@@ -276,6 +337,7 @@ fn mint_property_token(
     total_supply: u64,
     price_per_token: u64,
     use_usdt: bool,
+    transfer_restricted: bool,
 ) -> Option<u64> {
     let caller = ic_caller();
     
@@ -299,6 +361,7 @@ fn mint_property_token(
         total_supply,
         price_per_token,
         use_usdt,
+        transfer_restricted,
     )?;
 
     // Update property status
@@ -328,29 +391,6 @@ async fn purchase_tokens(token_id: u64, amount: u64) -> Result<bool, String> {
     management::purchase_tokens(token_id, amount).await
 }
 
-// Property Tokenization
-#[update]
-fn tokenize_property(
-    property_id: u64,
-    token_name: String,
-    token_symbol: String,
-    token_description: Option<String>,
-    total_supply: u64,
-    price_per_token: u64,
-    royalties: Option<u16>,
-) -> Option<u64> {
-    let metadata = token::TokenMetadata {
-        name: token_name,
-        symbol: token_symbol,
-        description: token_description,
-        image: None,
-        royalties,
-        royalty_recipient: Some(ic_caller()),
-    };
-
-    mint_property_token(property_id, metadata, total_supply, price_per_token, false)
-}
-
 // Rental Income Distribution
 #[update]
 async fn distribute_token_income(total_amount: u64, use_usdt: bool) -> Result<bool, String> {
@@ -367,4 +407,19 @@ fn initialize_payment_manager(ckusdc_id: Principal, ckusdt_id: Principal) {
 fn init() {
     PROPERTY_COUNTER.with(|counter| *counter.borrow_mut() = 0);
     TRANSACTION_COUNTER.with(|counter| *counter.borrow_mut() = 0);
+}
+
+#[query]
+fn get_metadata(token_id: u64) -> Option<token::TokenMetadata> {
+    icrc7::get_metadata(token_id)
+}
+
+#[query]
+fn get_token_stats(token_id: u64) -> Option<token::TokenStats> {
+    icrc7::get_token_stats(token_id)
+}
+
+#[query]
+fn get_collection_info() -> Option<token::Collection> {
+    icrc7::get_collection_info()
 }

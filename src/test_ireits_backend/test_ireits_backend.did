@@ -37,9 +37,18 @@ type TokenMetadata = record {
     name: text;
     symbol: text;
     description: opt text;
+    logo: opt blob;
+    content_type: opt text;
+    decimals: nat8;
+    website: opt text;
+    social_links: opt vec text;
+    supply_cap: opt nat64;
     image: opt blob;
     royalties: opt nat16;
     royalty_recipient: opt principal;
+    tags: opt vec text;
+    created_at: nat64;
+    modified_at: nat64;
 };
 
 type PropertyToken = record {
@@ -48,9 +57,13 @@ type PropertyToken = record {
     metadata: TokenMetadata;
     property_id: nat64;
     total_supply: nat64;
+    circulating_supply: nat64;
     price_per_token: nat64;
     available_supply: nat64;
     use_usdt: bool;
+    holders: nat64;
+    transfer_restricted: bool;
+    last_transfer: opt nat64;
 };
 
 type Collection = record {
@@ -58,9 +71,22 @@ type Collection = record {
     symbol: text;
     description: text;
     total_supply: nat64;
+    max_supply: opt nat64;
     royalties: nat16;
     owner: principal;
     treasury: principal;
+    created_at: nat64;
+    logo: opt blob;
+    website: opt text;
+    social_links: opt vec text;
+};
+
+type TokenStats = record {
+    total_transactions: nat64;
+    unique_holders: nat64;
+    market_cap: nat64;
+    volume_24h: nat64;
+    price_change_24h: float64;
 };
 
 type TransferArgs = record {
@@ -107,15 +133,36 @@ service : {
     name: () -> (text) query;
     symbol: () -> (text) query;
     total_supply: () -> (nat64) query;
+    max_supply: () -> (opt nat64) query;
     owner_of: (token_id: nat64) -> (opt principal) query;
     balance_of: (owner: principal) -> (nat64) query;
     transfer: (TransferArgs) -> (variant { Ok: bool; Err: text });
     approve: (ApprovalArgs) -> (variant { Ok: bool; Err: text });
     get_approved: (token_id: nat64) -> (opt record { principal; opt nat64 }) query;
+    get_metadata: (token_id: nat64) -> (opt TokenMetadata) query;
+    get_collection_info: () -> (opt Collection) query;
+    get_token_stats: (token_id: nat64) -> (opt TokenStats) query;
     
     // Property Token Management
-    initialize_collection: (name: text, symbol: text, description: text, royalties: nat16, treasury: principal) -> (bool);
-    mint_property_token: (property_id: nat64, metadata: TokenMetadata, total_supply: nat64, price_per_token: nat64, use_usdt: bool) -> (opt nat64);
+    initialize_collection: (
+        name: text,
+        symbol: text,
+        description: text,
+        royalties: nat16,
+        treasury: principal,
+        max_supply: opt nat64,
+        logo: opt blob,
+        website: opt text,
+        social_links: opt vec text
+    ) -> (bool);
+    mint_property_token: (
+        property_id: nat64,
+        metadata: TokenMetadata,
+        total_supply: nat64,
+        price_per_token: nat64,
+        use_usdt: bool,
+        transfer_restricted: bool
+    ) -> (opt nat64);
     get_token: (token_id: nat64) -> (opt PropertyToken) query;
     get_user_tokens: (user: principal) -> (vec PropertyToken) query;
     purchase_tokens: (token_id: nat64, amount: nat64) -> (variant { Ok: bool; Err: text });
