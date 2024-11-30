@@ -89,11 +89,20 @@ const Navbar: React.FC<NavbarProps> = ({ onLogin, loggedIn, onLogout, isLoading 
               Features
             </Link>
           </li>
-          <li>
-            <Link to="/dashboard" className="hover:text-yellow-400 transition-colors duration-300">
-              Dashboard
-            </Link>
-          </li>
+          {loggedIn && (
+            <>
+              <li>
+                <Link to="/marketplace" className="hover:text-yellow-400 transition-colors duration-300">
+                  Token Marketplace
+                </Link>
+              </li>
+              <li>
+                <Link to="/dashboard" className="hover:text-yellow-400 transition-colors duration-300">
+                  Dashboard
+                </Link>
+              </li>
+            </>
+          )}
         </ul>
         
         <div className="hidden md:flex items-center space-x-4">
@@ -114,11 +123,20 @@ const Navbar: React.FC<NavbarProps> = ({ onLogin, loggedIn, onLogout, isLoading 
                 Features
               </Link>
             </li>
-            <li>
-              <Link to="/dashboard" className="hover:text-yellow-400 transition-colors block px-4 py-2">
-                Dashboard
-              </Link>
-            </li>
+            {loggedIn && (
+              <>
+                <li>
+                  <Link to="/marketplace" className="hover:text-yellow-400 transition-colors block px-4 py-2">
+                    Token Marketplace
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/dashboard" className="hover:text-yellow-400 transition-colors block px-4 py-2">
+                    Dashboard
+                  </Link>
+                </li>
+              </>
+            )}
           </ul>
         </div>
       )}

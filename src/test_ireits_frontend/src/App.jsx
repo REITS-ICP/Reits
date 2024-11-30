@@ -11,12 +11,14 @@ import FeaturePage from './pages/Feature';
 import LoginPage from './pages/Login';
 import Footer from './components/Footer';
 import DashboardPage from './pages/Dashboard';
+import TokenMarketplace from './pages/TokenMarketplace';
 
 function App() {
   const [loggedIn, setLoggedIn] = useState(false);
   const [backendActor, setBackendActor] = useState(null);
   const [authClient, setAuthClient] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [userPrincipal, setUserPrincipal] = useState(null);
 
   const initializeAgent = async (identity) => {
     const agent = new HttpAgent({
@@ -51,6 +53,7 @@ function App() {
           const actor = await initializeAgent(identity);
           setBackendActor(actor);
           setLoggedIn(true);
+          setUserPrincipal(identity.getPrincipal());
         }
       } catch (err) {
         console.error('Error initializing authentication:', err);
@@ -59,19 +62,6 @@ function App() {
 
     initAuth();
   }, []);
-
-  const handleAuthentication = async (identity) => {
-    try {
-      const actor = await initializeAgent(identity);
-      setBackendActor(actor);
-      setLoggedIn(true);
-      const principalId = identity.getPrincipal().toText();
-      console.log("PrincipalId:", principalId);
-    } catch (err) {
-      console.error('Error during authentication:', err);
-      setIsLoading(false);
-    }
-  };
 
   const login = async () => {
     if (!authClient || isLoading) return;
@@ -92,9 +82,12 @@ function App() {
             toolbar=0,location=0,menubar=0,width=525,height=705
           `,
           maxTimeToLive: BigInt(7 * 24 * 60 * 60 * 1000 * 1000 * 1000), // 7 days
-          onSuccess: () => {
+          onSuccess: async () => {
             const identity = authClient.getIdentity();
-            handleAuthentication(identity);
+            const actor = await initializeAgent(identity);
+            setBackendActor(actor);
+            setLoggedIn(true);
+            setUserPrincipal(identity.getPrincipal());
             resolve();
           },
           onError: (err) => {
@@ -117,6 +110,7 @@ function App() {
       await authClient.logout();
       setLoggedIn(false);
       setBackendActor(null);
+      setUserPrincipal(null);
     } catch (err) {
       console.error('Error during logout:', err);
     }
@@ -144,6 +138,15 @@ function App() {
               />
             } />
             <Route path="/dashboard" element={<DashboardPage />} />
+            <Route 
+              path="/marketplace" 
+              element={
+                <TokenMarketplace 
+                  actor={backendActor}
+                  userPrincipal={userPrincipal}
+                />
+              } 
+            />
           </Routes>
           <Footer />
         </Router>
