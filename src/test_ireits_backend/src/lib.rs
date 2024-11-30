@@ -5,6 +5,9 @@ use serde::Serialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
+mod token;
+pub use token::{icrc7, management};
+
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 pub struct Property {
     id: u64,
@@ -13,8 +16,16 @@ pub struct Property {
     location: String,
     description: String,
     status: PropertyStatus,
-    nft_id: Option<String>,
+    token_id: Option<u64>,
     documents: Vec<Document>,
+    rental_income: Option<RentalIncome>,
+}
+
+#[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
+pub struct RentalIncome {
+    monthly_amount: u64,  // in cKUSDC/cKUSDT
+    last_distribution: u64,  // timestamp
+    distribution_frequency: u64,  // in seconds
 }
 
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
@@ -37,6 +48,7 @@ pub enum DocumentType {
 #[derive(CandidType, Deserialize, Serialize, Clone, Debug)]
 pub enum PropertyStatus {
     Available,
+    Tokenized,
     UnderContract,
     Sold,
 }
@@ -67,7 +79,12 @@ thread_local! {
 }
 
 #[update]
-fn list_property(price: f64, location: String, description: String) -> Property {
+fn list_property(
+    price: f64, 
+    location: String, 
+    description: String,
+    rental_income: Option<RentalIncome>
+) -> Property {
     let caller = ic_caller();
 
     PROPERTY_COUNTER.with(|counter| {
@@ -82,8 +99,9 @@ fn list_property(price: f64, location: String, description: String) -> Property 
             location,
             description,
             status: PropertyStatus::Available,
-            nft_id: None,
+            token_id: None,
             documents: Vec::new(),
+            rental_income,
         };
 
         PROPERTIES.with(|properties| {
@@ -92,6 +110,86 @@ fn list_property(price: f64, location: String, description: String) -> Property 
 
         property
     })
+}
+
+#[update]
+fn tokenize_property(
+    property_id: u64,
+    token_name: String,
+    token_symbol: String,
+    token_description: Option<String>,
+    total_supply: u64,
+    price_per_token: u64,
+    royalties: Option<u16>,
+) -> Option<u64> {
+    let caller = ic_caller();
+
+    PROPERTIES.with(|properties| {
+        let mut properties_ref = properties.borrow_mut();
+        let property = properties_ref.get_mut(&property_id)?;
+
+        if property.owner != caller || property.token_id.is_some() {
+            return None;
+        }
+
+        let metadata = token::TokenMetadata {
+            name: token_name,
+            symbol: token_symbol,
+            description: token_description,
+            image: None,
+            royalties,
+            royalty_recipient: Some(caller),
+        };
+
+        let token_id = management::mint_property_token(
+            property_id,
+            metadata,
+            total_supply,
+            price_per_token,
+        )?;
+
+        property.token_id = Some(token_id);
+        property.status = PropertyStatus::Tokenized;
+
+        Some(token_id)
+    })
+}
+
+#[update]
+fn distribute_rental_income(property_id: u64) -> bool {
+    let caller = ic_caller();
+
+    PROPERTIES.with(|properties| {
+        let mut properties_ref = properties.borrow_mut();
+        let property = properties_ref.get_mut(&property_id)?;
+
+        if property.owner != caller {
+            return None;
+        }
+
+        let rental_income = property.rental_income.as_ref()?;
+        let token_id = property.token_id?;
+
+        // Get token details
+        let token = management::get_token(token_id)?;
+        let total_supply = token.total_supply;
+
+        // Calculate distribution
+        let current_time = ic_cdk::api::time();
+        let time_since_last = current_time - rental_income.last_distribution;
+        
+        if time_since_last < rental_income.distribution_frequency {
+            return None;
+        }
+
+        // TODO: Implement actual distribution logic with cKUSDC/cKUSDT transfers
+        // For each token holder:
+        // 1. Calculate their share based on token ownership
+        // 2. Transfer the appropriate amount of cKUSDC/cKUSDT
+
+        property.rental_income.as_mut()?.last_distribution = current_time;
+        Some(true)
+    }).unwrap_or(false)
 }
 
 #[query]

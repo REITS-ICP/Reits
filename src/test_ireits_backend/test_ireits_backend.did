@@ -5,15 +5,22 @@ type Document = record {
     timestamp: nat64;
 };
 
+type RentalIncome = record {
+    monthly_amount: nat64;
+    last_distribution: nat64;
+    distribution_frequency: nat64;
+};
+
 type Property = record {
     id: nat64;
     owner: principal;
     price: float64;
     location: text;
     description: text;
-    status: variant { Available; UnderContract; Sold };
-    nft_id: opt text;
+    status: variant { Available; Tokenized; UnderContract; Sold };
+    token_id: opt nat64;
     documents: vec Document;
+    rental_income: opt RentalIncome;
 };
 
 type Transaction = record {
@@ -26,14 +33,88 @@ type Transaction = record {
     timestamp: nat64;
 };
 
+type TokenMetadata = record {
+    name: text;
+    symbol: text;
+    description: opt text;
+    image: opt blob;
+    royalties: opt nat16;
+    royalty_recipient: opt principal;
+};
+
+type PropertyToken = record {
+    token_id: nat64;
+    owner: principal;
+    metadata: TokenMetadata;
+    property_id: nat64;
+    total_supply: nat64;
+    price_per_token: nat64;
+    available_supply: nat64;
+    use_usdt: bool;
+};
+
+type Collection = record {
+    name: text;
+    symbol: text;
+    description: text;
+    total_supply: nat64;
+    royalties: nat16;
+    owner: principal;
+    treasury: principal;
+};
+
+type PaymentError = record {
+    kind: variant {
+        InsufficientBalance;
+        TransferFailed;
+        InvalidToken;
+    };
+    message: text;
+};
+
 service : {
-    add_document: (nat64, variant { Deed; Title; Contract; Inspection; Other }, text) -> (bool);
-    assign_agent: (nat64, principal) -> (bool);
-    complete_transaction: (nat64) -> (bool);
+    // Property Management
+    list_property: (price: float64, location: text, description: text, rental_income: opt RentalIncome) -> (Property);
+    get_property: (property_id: nat64) -> (opt Property) query;
     get_all_properties: () -> (vec Property) query;
-    get_property: (nat64) -> (opt Property) query;
-    get_transaction: (nat64) -> (opt Transaction) query;
-    get_user_properties: (principal) -> (vec Property) query;
-    initiate_transaction: (nat64) -> (nat64);
-    list_property: (float64, text, text) -> (Property);
-}
+    get_user_properties: (user: principal) -> (vec Property) query;
+    add_document: (property_id: nat64, doc_type: variant { Deed; Title; Contract; Inspection; Other }, hash: text) -> (bool);
+    
+    // Transaction Management
+    initiate_transaction: (property_id: nat64) -> (nat64);
+    complete_transaction: (transaction_id: nat64) -> (bool);
+    get_transaction: (transaction_id: nat64) -> (opt Transaction) query;
+    
+    // Token Management (ICRC-7)
+    name: () -> (text) query;
+    symbol: () -> (text) query;
+    total_supply: () -> (nat64) query;
+    owner_of: (token_id: nat64) -> (opt principal) query;
+    balance_of: (owner: principal) -> (nat64) query;
+    transfer: (to: principal, token_id: nat64) -> (variant { Ok: bool; Err: text });
+    
+    // Property Token Management
+    initialize_collection: (name: text, symbol: text, description: text, royalties: nat16, treasury: principal) -> (bool);
+    mint_property_token: (property_id: nat64, metadata: TokenMetadata, total_supply: nat64, price_per_token: nat64, use_usdt: bool) -> (opt nat64);
+    get_token: (token_id: nat64) -> (opt PropertyToken) query;
+    get_user_tokens: (user: principal) -> (vec PropertyToken) query;
+    purchase_tokens: (token_id: nat64, amount: nat64) -> (variant { Ok: bool; Err: text });
+    
+    // Property Tokenization
+    tokenize_property: (
+        property_id: nat64,
+        token_name: text,
+        token_symbol: text,
+        token_description: opt text,
+        total_supply: nat64,
+        price_per_token: nat64,
+        royalties: opt nat16
+    ) -> (opt nat64);
+    
+    // Rental Income Distribution
+    distribute_rental_income: (property_id: nat64) -> (bool);
+    distribute_token_income: (token_id: nat64, total_amount: nat64, use_usdt: bool) -> (variant { Ok: bool; Err: text });
+    
+    // Payment Management
+    initialize_payment_manager: (ckusdc_id: principal, ckusdt_id: principal) -> ();
+};
