@@ -1,0 +1,39 @@
+type Document = record {
+    id: nat64;
+    doc_type: variant { Deed; Title; Contract; Inspection; Other };
+    hash: text;
+    timestamp: nat64;
+};
+
+type Property = record {
+    id: nat64;
+    owner: principal;
+    price: float64;
+    location: text;
+    description: text;
+    status: variant { Available; UnderContract; Sold };
+    nft_id: opt text;
+    documents: vec Document;
+};
+
+type Transaction = record {
+    id: nat64;
+    property_id: nat64;
+    seller: principal;
+    buyer: principal;
+    price: float64;
+    status: variant { Pending; Completed; Cancelled };
+    timestamp: nat64;
+};
+
+service : {
+    add_document: (nat64, variant { Deed; Title; Contract; Inspection; Other }, text) -> (bool);
+    assign_agent: (nat64, principal) -> (bool);
+    complete_transaction: (nat64) -> (bool);
+    get_all_properties: () -> (vec Property) query;
+    get_property: (nat64) -> (opt Property) query;
+    get_transaction: (nat64) -> (opt Transaction) query;
+    get_user_properties: (principal) -> (vec Property) query;
+    initiate_transaction: (nat64) -> (nat64);
+    list_property: (float64, text, text) -> (Property);
+}
