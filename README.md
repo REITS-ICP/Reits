@@ -1,71 +1,186 @@
-# `IREITs TOKENIZATION `
+# RWA - Real World Asset Tokenization Platform
 
-### LIVE DEMO
-- [Frontend](https://qiriz-wyaaa-aaaak-qloaq-cai.icp0.io/)
-- [Backend](https://a4gq6-oaaaa-aaaab-qaa4q-cai.raw.icp0.io/?id=qpqon-3aaaa-aaaak-qloaa-cai)
+A decentralized platform for tokenizing real estate and other real-world assets on the Internet Computer blockchain.
 
+## Overview
 
+RWA is a comprehensive platform that enables the tokenization of real-world assets, particularly real estate, into tradeable digital tokens. The platform implements the ICRC-7 token standard and provides a full suite of features for property management, token creation, trading, and rental income distribution.
 
-Welcome to your new `test_ireits` project and to the Internet Computer development community. By default, creating a new project adds this README and some template files to your project directory. You can edit these template files to customize your project and to include your own code to speed up the development cycle.
+## Features
 
-To get started, you might want to explore the project directory structure and the default configuration file. Working with this project in your development environment will not affect any production deployment or identity tokens.
+### Property Management
+- List and manage real estate properties
+- Upload and verify property documents (deeds, titles, inspections)
+- Track property status and ownership
+- Manage rental income and distributions
 
-To learn more before you start working with `test_ireits`, see the following documentation available online:
+### Token System (ICRC-7 Standard)
+- Create property-backed tokens with detailed metadata
+- Configure token supply, pricing, and trading parameters
+- Support for royalties and transfer restrictions
+- Track token statistics and market metrics
 
-- [Quick Start](https://internetcomputer.org/docs/current/developer-docs/setup/deploy-locally)
-- [SDK Developer Tools](https://internetcomputer.org/docs/current/developer-docs/setup/install)
-- [Rust Canister Development Guide](https://internetcomputer.org/docs/current/developer-docs/backend/rust/)
-- [ic-cdk](https://docs.rs/ic-cdk)
-- [ic-cdk-macros](https://docs.rs/ic-cdk-macros)
-- [Candid Introduction](https://internetcomputer.org/docs/current/developer-docs/backend/candid/)
+### Trading Features
+- Buy and sell property tokens
+- Transfer tokens between users
+- Approve and delegate token operations
+- Track transaction history
 
-If you want to start working on your project right away, you might want to try the following commands:
+### Payment System
+- Support for both USDC and USDT stablecoins
+- Automated rental income distribution
+- Royalty payments handling
+- Secure payment processing
 
+## Technical Architecture
+
+### Backend Canisters
+1. `test_ireits_backend`: Main canister handling property and token logic
+2. `mock_usdc`: Mock USDC ledger for testing
+3. `mock_usdt`: Mock USDT ledger for testing
+4. `internet-identity`: Authentication canister
+
+### Token Implementation
+The platform implements the ICRC-7 token standard with enhanced features:
+- Full metadata support (name, symbol, decimals, etc.)
+- Market statistics tracking
+- Supply management
+- Transfer restrictions
+- Royalty system
+
+### Smart Contract Features
+- Automated rental income distribution
+- Configurable token parameters
+- Property-token linking
+- Document verification
+
+## Getting Started
+
+### Prerequisites
+- dfx (Internet Computer SDK)
+- Node.js and npm
+- Rust toolchain
+
+### Installation
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/REITS-ICP/Reits.git
+   cd Reits
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Start the local Internet Computer replica:
+   ```bash
+   dfx start --background --clean 
+   ```
+
+4. Deploy the canisters:
+   ```bash
+   dfx deploy
+   ```
+
+### Configuration
+
+1. Initialize the collection:
+   ```bash
+   dfx canister call test_ireits_backend initialize_collection '(
+     "RWA Collection",
+     "RWAC",
+     "Real World Asset Collection",
+     250: nat16,
+     principal "your-treasury-principal",
+     opt (10000: nat64),
+     null,
+     opt "https://rwa.com",
+     opt vec { "https://twitter.com/rwa"; "https://discord.gg/rwa" }
+   )'
+   ```
+
+2. Configure payment managers:
+   ```bash
+   dfx canister call test_ireits_backend initialize_payment_manager "(principal \"$(dfx canister id mock_usdc)\", principal \"$(dfx canister id mock_usdt)\")"
+   ```
+
+## Usage Examples
+
+### List a Property
 ```bash
-cd test_ireits/
-dfx help
-dfx canister --help
+dfx canister call test_ireits_backend list_property '(
+  1000.0: float64,
+  "123 Main St",
+  "Beautiful 3 bed house",
+  null
+)'
 ```
 
-## Running the project locally
-
-If you want to test your project locally, you can use the following commands:
-
+### Tokenize a Property
 ```bash
-# Starts the replica, running in the background
-dfx start --background
-
-# Deploys your canisters to the replica and generates your candid interface
-dfx deploy
+dfx canister call test_ireits_backend tokenize_property '(
+  1: nat64,
+  "RWA Token",
+  "RWA",
+  opt "Real World Asset Token",
+  1000: nat64,
+  10: nat64,
+  opt 250
+)'
 ```
 
-Once the job completes, your application will be available at `http://localhost:4943?canisterId={asset_canister_id}`.
-
-If you have made changes to your backend canister, you can generate a new candid interface with
-
+### Purchase Tokens
 ```bash
-npm run generate
+dfx canister call test_ireits_backend purchase_tokens '(1: nat64, 100: nat64)'
 ```
 
-at any time. This is recommended before starting the frontend development server, and will be run automatically any time you run `dfx deploy`.
-
-If you are making frontend changes, you can start a development server with
-
+### Transfer Tokens
 ```bash
-npm start
+dfx canister call test_ireits_backend transfer '(
+  record {
+    spender_subaccount = null;
+    from = principal "sender-principal";
+    to = principal "receiver-principal";
+    token_id = 1;
+    memo = null;
+    created_at_time = null
+  }
+)'
 ```
 
-Which will start a server at `http://localhost:8080`, proxying API requests to the replica at port 4943.
+## API Documentation
 
-### Note on frontend environment variables
+### Property Management
+- `list_property`: Create a new property listing
+- `get_property`: Retrieve property details
+- `add_document`: Add property documents
+- `get_all_properties`: List all properties
 
-If you are hosting frontend code somewhere without using DFX, you may need to make one of the following adjustments to ensure your project does not fetch the root key in production:
+### Token Management
+- `name`: Get token collection name
+- `symbol`: Get token symbol
+- `total_supply`: Get total token supply
+- `owner_of`: Get token owner
+- `balance_of`: Get user's token balance
+- `transfer`: Transfer tokens
+- `approve`: Approve token delegation
+- `get_metadata`: Get token metadata
+- `get_token_stats`: Get token statistics
 
-- set`DFX_NETWORK` to `ic` if you are using Webpack
-- use your own preferred method to replace `process.env.DFX_NETWORK` in the autogenerated declarations
-  - Setting `canisters -> {asset_canister_id} -> declarations -> env_override to a string` in `dfx.json` will replace `process.env.DFX_NETWORK` with the string in the autogenerated declarations
-- Write your own `createActor` constructor
-# test_ireits
-# test-ireits
-# RWA
-# RWA
+### Transaction Management
+- `initiate_transaction`: Start a property transaction
+- `complete_transaction`: Complete a property transaction
+- `get_transaction`: Get transaction details
+
+### Income Distribution
+- `distribute_token_income`: Distribute rental income to token holders
+
+## Security
+
+The platform implements several security measures:
+- Principal-based authentication
+- Transfer restrictions
+- Approval system for delegated operations
+- Secure payment processing
+- Document verification
