@@ -1,0 +1,59 @@
+type ListingPrice = record {
+    amount: nat64;
+    token_type: variant {
+        RET;
+        ICP;
+    };
+};
+
+type Listing = record {
+    id: nat64;
+    property_token_id: nat64;
+    seller: principal;
+    price: ListingPrice;
+    created_at: nat64;
+    status: variant {
+        Active;
+        Sold;
+        Cancelled;
+    };
+    highest_bid: opt Bid;
+    royalty_percentage: nat16;
+    listing_fee: nat64;
+};
+
+type Bid = record {
+    bidder: principal;
+    amount: nat64;
+    token_type: variant {
+        RET;
+        ICP;
+    };
+    timestamp: nat64;
+};
+
+type MarketplaceStats = record {
+    total_listings: nat64;
+    active_listings: nat64;
+    total_sales: nat64;
+    total_volume_ret: nat64;
+    total_volume_icp: nat64;
+    total_listing_fees: nat64;
+};
+
+service : {
+    // Listing Management
+    list_property: (property_token_id: nat64, price: ListingPrice, royalty_percentage: nat16) -> (variant { Ok: nat64; Err: text });
+    cancel_listing: (listing_id: nat64) -> (variant { Ok: bool; Err: text });
+    
+    // Bidding
+    place_bid: (listing_id: nat64, amount: nat64, token_type: variant { RET; ICP }) -> (variant { Ok: bool; Err: text });
+    accept_bid: (listing_id: nat64) -> (variant { Ok: bool; Err: text });
+    
+    // Queries
+    get_listing: (listing_id: nat64) -> (opt Listing) query;
+    get_active_listings: () -> (vec Listing) query;
+    get_user_listings: (user: principal) -> (vec Listing) query;
+    get_user_bids: (user: principal) -> (vec record { nat64; Bid }) query;
+    get_stats: () -> (MarketplaceStats) query;
+}; 

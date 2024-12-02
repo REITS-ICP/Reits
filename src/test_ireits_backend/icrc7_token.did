@@ -1,28 +1,3 @@
-type Document = record {
-    id: nat64;
-    doc_type: variant { Deed; Title; Contract; Inspection; Other };
-    hash: text;
-    timestamp: nat64;
-};
-
-type RentalIncome = record {
-    monthly_amount: nat64;
-    last_distribution: nat64;
-    distribution_frequency: nat64;
-};
-
-type Property = record {
-    id: nat64;
-    owner: principal;
-    price: float64;
-    location: text;
-    description: text;
-    status: variant { Listed; UnderContract; Sold; Tokenized };
-    documents: vec Document;
-    rental_income: opt RentalIncome;
-    token_id: opt nat64;
-};
-
 type TokenMetadata = record {
     name: text;
     symbol: text;
@@ -91,29 +66,7 @@ type ApprovalArgs = record {
 };
 
 service : {
-    // Property Management
-    list_property: (price: float64, location: text, description: text, rental_income: opt RentalIncome) -> (Property);
-    get_property: (property_id: nat64) -> (opt Property) query;
-    get_all_properties: () -> (vec Property) query;
-    get_user_properties: (user: principal) -> (vec Property) query;
-    add_document: (property_id: nat64, doc_type: variant { Deed; Title; Contract; Inspection; Other }, hash: text) -> (bool);
-    
-    // Token Management (ICRC-7)
-    name: () -> (text) query;
-    symbol: () -> (text) query;
-    total_supply: () -> (nat64) query;
-    owner_of: (token_id: nat64) -> (opt principal) query;
-    balance_of: (owner: principal) -> (nat64) query;
-    transfer: (TransferArgs) -> (variant { Ok: bool; Err: text });
-    approve: (ApprovalArgs) -> (variant { Ok: bool; Err: text });
-    get_approved: (token_id: nat64) -> (opt record { principal; opt nat64 }) query;
-    get_metadata: (token_id: nat64) -> (opt TokenMetadata) query;
-    get_token: (token_id: nat64) -> (opt Token) query;
-    get_collection_info: () -> (opt Collection) query;
-    get_token_stats: (token_id: nat64) -> (opt TokenStats) query;
-    get_user_tokens: (user: principal) -> (vec Token) query;
-    
-    // Property Token Management
+    // Collection Management
     initialize_collection: (
         name: text,
         symbol: text,
@@ -125,16 +78,29 @@ service : {
         website: opt text,
         social_links: opt vec text
     ) -> (bool);
-    tokenize_property: (
-        property_id: nat64,
-        token_name: text,
-        token_symbol: text,
-        token_description: opt text,
-        total_supply: nat64,
-        price_per_token: nat64,
-        royalties: opt nat16
+
+    // Token Queries
+    name: () -> (text) query;
+    symbol: () -> (text) query;
+    total_supply: () -> (nat64) query;
+    max_supply: () -> (opt nat64) query;
+    owner_of: (token_id: nat64) -> (opt principal) query;
+    balance_of: (owner: principal) -> (nat64) query;
+
+    // Token Operations
+    mint: (
+        owner: principal,
+        metadata: TokenMetadata,
+        transfer_restricted: bool
     ) -> (opt nat64);
-    
-    // Payment Management
-    initialize_payment_manager: (ckusdc_id: principal, ckusdt_id: principal) -> ();
-};
+    transfer: (TransferArgs) -> (variant { Ok: bool; Err: text });
+    approve: (ApprovalArgs) -> (variant { Ok: bool; Err: text });
+
+    // Queries
+    get_approved: (token_id: nat64) -> (opt record { principal; opt nat64 }) query;
+    get_metadata: (token_id: nat64) -> (opt TokenMetadata) query;
+    get_token: (token_id: nat64) -> (opt Token) query;
+    get_collection_info: () -> (opt Collection) query;
+    get_token_stats: (token_id: nat64) -> (opt TokenStats) query;
+    get_user_tokens: (user: principal) -> (vec Token) query;
+}; 
