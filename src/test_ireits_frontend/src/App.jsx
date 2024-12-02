@@ -1,155 +1,110 @@
 import { useState, useEffect } from 'react';
 import { AuthClient } from '@dfinity/auth-client';
 import { HttpAgent } from '@dfinity/agent';
-import { createActor } from '../../declarations/test_ireits_backend';
+import { createActor } from '../declarations/test_ireits_backend';
+// import BuyToken from "./components/buy-token";
 
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Navbar from './components/Navabar';
 import HomePage from './pages/Homepage';
 import FeaturePage from './pages/Feature';
+// import AboutPage from './pages/About';
 import LoginPage from './pages/Login';
 import Footer from './components/Footer';
 import DashboardPage from './pages/Dashboard';
-import TokenMarketplace from './pages/TokenMarketplace';
+
 
 function App() {
+  const [greeting, setGreeting] = useState('');
   const [loggedIn, setLoggedIn] = useState(false);
-  const [backendActor, setBackendActor] = useState(null);
-  const [authClient, setAuthClient] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [userPrincipal, setUserPrincipal] = useState(null);
-
-  const initializeAgent = async (identity) => {
-    const agent = new HttpAgent({
-      identity,
-      host: process.env.DFX_NETWORK === 'local' ? 'http://localhost:4943' : 'https://ic0.app',
-    });
-
-    if (process.env.DFX_NETWORK === 'local') {
-      try {
-        await agent.fetchRootKey();
-      } catch (err) {
-        console.warn('Unable to fetch root key:', err);
-      }
-    }
-
-    return createActor(process.env.CANISTER_ID_TEST_IREITS_BACKEND, { agent });
-  };
 
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        const client = await AuthClient.create({
-          idleOptions: {
-            disableIdle: true,
-          }
-        });
-        setAuthClient(client);
-
-        const isAuthenticated = await client.isAuthenticated();
-        if (isAuthenticated) {
-          const identity = client.getIdentity();
-          const actor = await initializeAgent(identity);
-          setBackendActor(actor);
-          setLoggedIn(true);
-          setUserPrincipal(identity.getPrincipal());
-        }
-      } catch (err) {
-        console.error('Error initializing authentication:', err);
-      }
+    const checkAuthentication = async () => {
+      const authClient = await AuthClient.create();
+      const isAuthenticated = await authClient.isAuthenticated();
+      setLoggedIn(isAuthenticated);
     };
 
-    initAuth();
+    checkAuthentication();
   }, []);
 
-  const login = async () => {
-    if (!authClient || isLoading) return;
+  function handleSubmit(event) {
+    event.preventDefault();
+    const name = event.target.elements.name.value;
+    NFID_new_backend.greet(name).then((greeting) => {
+      setGreeting(greeting);
+    });
+    return false;
+  }
 
-    try {
-      setIsLoading(true);
-      
-      const identityProvider = process.env.DFX_NETWORK === 'local'
-        ? `http://localhost:4943?canisterId=${process.env.CANISTER_ID_INTERNET_IDENTITY}`
-        : 'https://identity.ic0.app';
+  const createNFID = async () => {
+    const authClient = await AuthClient.create();
+    const APP_NAME = "NFID Test";
+    const APP_LOGO = "https://nfid.one/icons/favicon-96x96.png";
+    const CONFIG_QUERY = `?applicationName=${APP_NAME}&applicationLogo=${APP_LOGO}`;
 
-      await new Promise((resolve, reject) => {
-        authClient.login({
-          identityProvider,
-          windowOpenerFeatures: `
-            left=${window.screen.width / 2 - 525 / 2},
-            top=${window.screen.height / 2 - 705 / 2},
-            toolbar=0,location=0,menubar=0,width=525,height=705
-          `,
-          maxTimeToLive: BigInt(7 * 24 * 60 * 60 * 1000 * 1000 * 1000), // 7 days
-          onSuccess: async () => {
-            const identity = authClient.getIdentity();
-            const actor = await initializeAgent(identity);
-            setBackendActor(actor);
-            setLoggedIn(true);
-            setUserPrincipal(identity.getPrincipal());
-            resolve();
-          },
-          onError: (err) => {
-            console.error('Login error:', err);
-            setIsLoading(false);
-            reject(err);
-          },
-        });
+    const identityProvider = `https://nfid.one/authenticate${CONFIG_QUERY}`;
+
+    new Promise((resolve) => {
+      authClient.login({
+        identityProvider,
+        onSuccess: () => {
+          resolve(authClient);
+          setLoggedIn(true);
+        },
+        windowOpenerFeatures: `
+          left=${window.screen.width / 2 - 525 / 2},
+          top=${window.screen.height / 2 - 705 / 2},
+          toolbar=0,location=0,menubar=0,width=525,height=705
+        `,
       });
-    } catch (err) {
-      console.error('Error during login:', err);
-    } finally {
-      setIsLoading(false);
-    }
+    });
+
+    const identity = authClient.getIdentity();
+    const agent = new HttpAgent({ identity });
+    const actor = createActor("a3shf-5eaaa-aaaaa-qaafa-cai", { agent });
+    console.log("actor is", actor);
+    const principalId = authClient.getIdentity().getPrincipal().toText();
+    console.log("PrincipalId is", principalId);
   };
 
   const logout = async () => {
-    if (!authClient) return;
-    try {
-      await authClient.logout();
-      setLoggedIn(false);
-      setBackendActor(null);
-      setUserPrincipal(null);
-    } catch (err) {
-      console.error('Error during logout:', err);
-    }
+    const authClient = await AuthClient.create();
+    await authClient.logout();
+    setLoggedIn(false);
   };
+  <br />
+      {loggedIn ? (
+        <div>
+          <button onClick={logout}>Logout</button>
+          {/* Other authenticated user content can go here */}
+        </div>
+      ) : (
+        <button onClick={createNFID}>Login</button>
+      )}
 
   return (
     <main>
+      <br />
+      
+
       <div>
-        <Router>
-          <Navbar 
-            loggedIn={loggedIn} 
-            onLogin={login}
-            onLogout={logout}
-            isLoading={isLoading}
-            className="hover:text-pink-500 transition-colors" 
-          />
-          <Routes>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/features" element={<FeaturePage />} />
-            <Route path="/login" element={
-              <LoginPage 
-                loggedIn={loggedIn}
-                onLogin={login}
-                isLoading={isLoading}
-              />
-            } />
-            <Route path="/dashboard" element={<DashboardPage />} />
-            <Route 
-              path="/marketplace" 
-              element={
-                <TokenMarketplace 
-                  actor={backendActor}
-                  userPrincipal={userPrincipal}
-                />
-              } 
-            />
-          </Routes>
-          <Footer />
-        </Router>
+      <Router>
+      <Navbar loggedIn={loggedIn} onLogin={createNFID} onLogout={logout} className="hover:text-pink-500 transition-colors" />
+      
+       <Routes>
+        <Route path="/" element={<HomePage />} />
+        {/* <Route path="/about" element={<AboutPage />} /> */}
+        <Route path="/features" element={<FeaturePage />} />
+        <Route path='/login'elemen={<LoginPage />} />
+        <Route path='/dashboard' element={<DashboardPage/>} />
+        
+       </Routes>
+       <Footer />
+      </Router>
+
+     
       </div>
     </main>
   );

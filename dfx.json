@@ -1,16 +1,5 @@
 {
   "canisters": {
-    "internet-identity": {
-      "type": "custom",
-      "candid": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity.did",
-      "wasm": "https://github.com/dfinity/internet-identity/releases/latest/download/internet_identity_dev.wasm.gz",
-      "remote": {
-        "id": {
-          "ic": "rdmx6-jaaaa-aaaaa-aaadq-cai"
-        }
-      },
-      "frontend": {}
-    },
     "test_ireits_backend": {
       "type": "rust",
       "package": "test_ireits_backend",
@@ -24,8 +13,16 @@
     },
     "test_ireits_frontend": {
       "type": "assets",
-      "source": ["src/test_ireits_frontend/assets"],
+      "source": [
+        "src/test_ireits_frontend/assets",
+        "src/test_ireits_frontend/src",
+        "src/test_ireits_frontend/dist"
+      ],
       "dependencies": ["test_ireits_backend"],
+      "build": [
+        "cd src/test_ireits_frontend && npm install",
+        "cd src/test_ireits_frontend && npm run build"
+      ],
       "metadata": [
         {
           "name": "candid:service",

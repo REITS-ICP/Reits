@@ -31,6 +31,7 @@
     "leaflet": "^1.9.4",
     "lucide-react": "^0.451.0",
     "motion": "^11.11.17",
+    "process": "^0.11.10",
     "react-leaflet": "^4.2.1",
     "tailwind-merge": "^2.5.4",
     "tailwindcss-animate": "^1.0.7",
