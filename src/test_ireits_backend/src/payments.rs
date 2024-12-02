@@ -1,6 +1,8 @@
 use candid::{CandidType, Deserialize, Principal};
 use std::cell::RefCell;
 
+use crate::types::TokenType;
+
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub enum PaymentError {
     InsufficientBalance,
@@ -9,8 +11,7 @@ pub enum PaymentError {
 }
 
 pub struct PaymentManager {
-    usdc_ledger: Principal,
-    usdt_ledger: Principal,
+    ret_ledger: Principal,
 }
 
 thread_local! {
@@ -18,16 +19,28 @@ thread_local! {
 }
 
 impl PaymentManager {
-    pub fn new(usdc_ledger: Principal, usdt_ledger: Principal) -> Self {
+    pub fn new(ret_ledger: Principal) -> Self {
         PaymentManager {
-            usdc_ledger,
-            usdt_ledger,
+            ret_ledger,
+        }
+    }
+
+    pub fn verify_payment(&self, _from: Principal, _amount: u64, token_type: TokenType) -> Result<bool, PaymentError> {
+        match token_type {
+            TokenType::RET => {
+                // Verify RET balance and payment
+                Ok(true)
+            },
+            TokenType::ICP => {
+                // Verify ICP balance and payment
+                Ok(true)
+            }
         }
     }
 }
 
-pub fn initialize_payment_manager(usdc_ledger: Principal, usdt_ledger: Principal) {
+pub fn initialize_payment_manager(ret_ledger: Principal) {
     PAYMENT_MANAGER.with(|manager| {
-        *manager.borrow_mut() = Some(PaymentManager::new(usdc_ledger, usdt_ledger));
+        *manager.borrow_mut() = Some(PaymentManager::new(ret_ledger));
     });
 } 

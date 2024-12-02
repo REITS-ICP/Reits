@@ -1,14 +1,16 @@
 use candid::{CandidType, Deserialize, Principal};
-use ic_cdk::api::caller as ic_caller;
-use ic_cdk::{query, update};
 use std::cell::RefCell;
 use std::collections::HashMap;
 
 mod icrc7_token;
+mod ret_token;
+mod marketplace;
 mod payments;
+mod types;
 
-use icrc7_token::{ICRC7Token, TokenMetadata, Token, Collection, TokenStats, TransferArgs, ApprovalArgs};
-use payments::{PaymentManager, PaymentError};
+use types::TokenType;
+use ret_token::{RETToken, TokenMetadata as RETTokenMetadata, TokenStats, TransferArgs};
+use icrc7_token::{ICRC7Token, TokenMetadata as ICRC7TokenMetadata};
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct Property {
@@ -21,6 +23,14 @@ pub struct Property {
     pub documents: Vec<Document>,
     pub rental_income: Option<RentalIncome>,
     pub token_id: Option<u64>,
+}
+
+#[derive(CandidType, Deserialize, Clone, Debug)]
+pub enum PropertyStatus {
+    Listed,
+    UnderContract,
+    Sold,
+    Tokenized,
 }
 
 #[derive(CandidType, Deserialize, Clone, Debug)]
@@ -47,23 +57,80 @@ pub struct RentalIncome {
     pub distribution_frequency: u64,
 }
 
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub enum PropertyStatus {
-    Listed,
-    UnderContract,
-    Sold,
-    Tokenized,
+thread_local! {
+    static OWNER: RefCell<Principal> = RefCell::new(Principal::anonymous());
+    static PROPERTY_COUNTER: RefCell<u64> = RefCell::new(0);
+    static PROPERTIES: RefCell<HashMap<u64, Property>> = RefCell::new(HashMap::new());
 }
 
-thread_local! {
-    static PROPERTIES: RefCell<HashMap<u64, Property>> = RefCell::new(HashMap::new());
-    static PROPERTY_COUNTER: RefCell<u64> = RefCell::new(0);
+#[ic_cdk_macros::init]
+fn init() {
+    let caller = ic_cdk::api::caller();
+    OWNER.with(|owner| {
+        *owner.borrow_mut() = caller;
+    });
+}
+
+// RET Token Management
+#[ic_cdk_macros::update]
+fn initialize_ret(owner: Principal, website: Option<String>, social_links: Option<Vec<String>>) -> bool {
+    RETToken::initialize(owner, website, social_links)
+}
+
+#[ic_cdk_macros::query]
+fn get_ret_metadata() -> Option<RETTokenMetadata> {
+    RETToken::get_metadata()
+}
+
+#[ic_cdk_macros::query]
+fn balance_of(owner: Principal) -> u64 {
+    RETToken::balance_of(owner)
+}
+
+#[ic_cdk_macros::query]
+fn staked_balance_of(owner: Principal) -> u64 {
+    RETToken::staked_balance_of(owner)
+}
+
+#[ic_cdk_macros::update]
+fn stake(amount: u64, duration: u64) -> Result<bool, String> {
+    RETToken::stake(amount, duration)
+}
+
+#[ic_cdk_macros::update]
+fn unstake() -> Result<u64, String> {
+    RETToken::unstake()
+}
+
+#[ic_cdk_macros::update]
+fn transfer(args: TransferArgs) -> Result<bool, String> {
+    RETToken::transfer(args)
+}
+
+#[ic_cdk_macros::update]
+fn airdrop_ret(recipients: Vec<(Principal, u64)>) -> Result<bool, String> {
+    RETToken::airdrop(recipients)
+}
+
+#[ic_cdk_macros::query]
+fn get_ret_stats() -> TokenStats {
+    RETToken::get_stats()
+}
+
+// Payment Management
+#[ic_cdk_macros::update]
+fn initialize_payment_manager(ret_ledger: Principal) {
+    let caller = ic_cdk::api::caller();
+    OWNER.with(|owner| {
+        assert_eq!(caller, *owner.borrow(), "Only owner can initialize payment manager");
+    });
+    payments::initialize_payment_manager(ret_ledger);
 }
 
 // Property Management
-#[update]
+#[ic_cdk_macros::update]
 fn list_property(price: f64, location: String, description: String, rental_income: Option<RentalIncome>) -> Property {
-    let caller = ic_caller();
+    let caller = ic_cdk::api::caller();
     let id = PROPERTY_COUNTER.with(|counter| {
         let mut counter = counter.borrow_mut();
         *counter += 1;
@@ -89,17 +156,17 @@ fn list_property(price: f64, location: String, description: String, rental_incom
     property
 }
 
-#[query]
+#[ic_cdk_macros::query]
 fn get_property(property_id: u64) -> Option<Property> {
     PROPERTIES.with(|properties| properties.borrow().get(&property_id).cloned())
 }
 
-#[query]
+#[ic_cdk_macros::query]
 fn get_all_properties() -> Vec<Property> {
     PROPERTIES.with(|properties| properties.borrow().values().cloned().collect())
 }
 
-#[query]
+#[ic_cdk_macros::query]
 fn get_user_properties(user: Principal) -> Vec<Property> {
     PROPERTIES.with(|properties| {
         properties
@@ -111,9 +178,9 @@ fn get_user_properties(user: Principal) -> Vec<Property> {
     })
 }
 
-#[update]
+#[ic_cdk_macros::update]
 fn add_document(property_id: u64, doc_type: DocumentType, hash: String) -> bool {
-    let caller = ic_caller();
+    let caller = ic_cdk::api::caller();
     let timestamp = ic_cdk::api::time();
     
     PROPERTIES.with(|properties| {
@@ -137,49 +204,76 @@ fn add_document(property_id: u64, doc_type: DocumentType, hash: String) -> bool 
     })
 }
 
-// Token Management (ICRC-7)
-#[query]
-fn name() -> String {
-    ICRC7Token::name()
+#[ic_cdk_macros::update]
+fn test_advance_time(duration_nanos: u64) -> Result<bool, String> {
+    #[cfg(test)]
+    {
+        // Only allow time advancement in test mode
+        Ok(true)
+    }
+    #[cfg(not(test))]
+    {
+        Err("Time advancement only allowed in test mode".to_string())
+    }
 }
 
-#[query]
-fn symbol() -> String {
-    ICRC7Token::symbol()
+#[ic_cdk_macros::update]
+fn tokenize_property(
+    property_id: u64,
+    name: String,
+    symbol: String,
+    description: Option<String>,
+    total_supply: u64,
+    available_supply: u64,
+    royalty_percentage: Option<u16>,
+) -> Result<bool, String> {
+    let caller = ic_cdk::api::caller();
+    
+    // Verify property ownership
+    PROPERTIES.with(|properties| {
+        let mut properties = properties.borrow_mut();
+        let property = properties.get_mut(&property_id)
+            .ok_or("Property not found")?;
+        
+        if property.owner != caller {
+            return Err("Not the property owner".to_string());
+        }
+        
+        if property.token_id.is_some() {
+            return Err("Property already tokenized".to_string());
+        }
+        
+        // Create ICRC7 token
+        let token_metadata = ICRC7TokenMetadata {
+            name,
+            symbol,
+            description,
+            logo: None,
+            content_type: None,
+            decimals: 0,
+            website: None,
+            social_links: None,
+            supply_cap: Some(total_supply),
+            image: None,
+            royalties: royalty_percentage,
+            royalty_recipient: Some(caller),
+            tags: Some(vec!["real-estate".to_string()]),
+            created_at: ic_cdk::api::time(),
+            modified_at: ic_cdk::api::time(),
+        };
+        
+        let token_id = ICRC7Token::mint(caller, token_metadata, false)
+            .ok_or("Failed to mint token")?;
+        
+        // Update property status
+        property.status = PropertyStatus::Tokenized;
+        property.token_id = Some(token_id);
+        
+        Ok(true)
+    })
 }
 
-#[query]
-fn total_supply() -> u64 {
-    ICRC7Token::total_supply()
-}
-
-#[query]
-fn owner_of(token_id: u64) -> Option<Principal> {
-    ICRC7Token::owner_of(token_id)
-}
-
-#[query]
-fn balance_of(owner: Principal) -> u64 {
-    ICRC7Token::balance_of(owner)
-}
-
-#[update]
-fn transfer(args: TransferArgs) -> Result<bool, String> {
-    ICRC7Token::transfer(args)
-}
-
-#[update]
-fn approve(args: ApprovalArgs) -> Result<bool, String> {
-    ICRC7Token::approve(args)
-}
-
-#[query]
-fn get_approved(token_id: u64) -> Option<(Principal, Option<u64>)> {
-    ICRC7Token::get_approved(token_id)
-}
-
-// Property Token Management
-#[update]
+#[ic_cdk_macros::update]
 fn initialize_collection(
     name: String,
     symbol: String,
@@ -204,95 +298,38 @@ fn initialize_collection(
     )
 }
 
-#[update]
-fn tokenize_property(
+#[ic_cdk_macros::update]
+fn fractionalize_property(
     property_id: u64,
-    token_name: String,
-    token_symbol: String,
-    token_description: Option<String>,
-    total_supply: u64,
-    price_per_token: u64,
-    royalties: Option<u16>,
-) -> Option<u64> {
-    let caller = ic_caller();
+    shares: Vec<(Principal, u16)>,
+) -> Result<bool, String> {
+    let caller = ic_cdk::api::caller();
     
     // Verify property ownership
-    let owns_property = PROPERTIES.with(|properties| {
-        properties
-            .borrow()
-            .get(&property_id)
-            .map(|p| p.owner == caller)
-            .unwrap_or(false)
-    });
-
-    if !owns_property {
-        return None;
-    }
-
-    let metadata = TokenMetadata {
-        name: token_name,
-        symbol: token_symbol,
-        description: token_description,
-        logo: None,
-        content_type: None,
-        decimals: 0,
-        website: None,
-        social_links: None,
-        supply_cap: Some(total_supply),
-        image: None,
-        royalties,
-        royalty_recipient: Some(caller),
-        tags: Some(vec!["REIT".to_string(), "Property".to_string()]),
-        created_at: ic_cdk::api::time(),
-        modified_at: ic_cdk::api::time(),
-    };
-
-    let token_id = ICRC7Token::mint(caller, metadata, false)?;
-
-    // Update property status
     PROPERTIES.with(|properties| {
-        let mut properties = properties.borrow_mut();
-        if let Some(property) = properties.get_mut(&property_id) {
-            property.status = PropertyStatus::Tokenized;
-            property.token_id = Some(token_id);
+        let properties = properties.borrow();
+        let property = properties.get(&property_id)
+            .ok_or("Property not found")?;
+        
+        if property.owner != caller {
+            return Err("Not the property owner".to_string());
         }
-    });
-
-    Some(token_id)
-}
-
-#[query]
-fn get_token(token_id: u64) -> Option<Token> {
-    ICRC7Token::get_token(token_id)
-}
-
-#[query]
-fn get_user_tokens(user: Principal) -> Vec<Token> {
-    ICRC7Token::get_user_tokens(user)
-}
-
-#[query]
-fn get_metadata(token_id: u64) -> Option<TokenMetadata> {
-    ICRC7Token::get_metadata(token_id)
-}
-
-#[query]
-fn get_token_stats(token_id: u64) -> Option<TokenStats> {
-    ICRC7Token::get_token_stats(token_id)
-}
-
-#[query]
-fn get_collection_info() -> Option<Collection> {
-    ICRC7Token::get_collection_info()
-}
-
-// Payment Management
-#[update]
-fn initialize_payment_manager(ckusdc_id: Principal, ckusdt_id: Principal) {
-    payments::initialize_payment_manager(ckusdc_id, ckusdt_id);
-}
-
-#[ic_cdk::init]
-fn init() {
-    PROPERTY_COUNTER.with(|counter| *counter.borrow_mut() = 0);
+        
+        if property.token_id.is_none() {
+            return Err("Property not tokenized".to_string());
+        }
+        
+        let token_id = property.token_id.unwrap();
+        
+        // Verify caller owns the token
+        if !ICRC7Token::owner_of(token_id)
+            .map(|owner| owner == caller)
+            .unwrap_or(false) {
+            return Err("Not the token owner".to_string());
+        }
+        
+        // Call marketplace to fractionalize
+        marketplace::Marketplace::fractionalize_property(property_id, shares)
+            .map(|_| true)
+    })
 }

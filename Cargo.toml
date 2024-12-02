@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "src/test_ireits_backend",
-    "src/mock_ledger",
 ]
 resolver = "2"
 

@@ -11,43 +11,25 @@
       },
       "frontend": {}
     },
-    "mock_usdc": {
-      "type": "rust",
-      "package": "mock_ledger",
-      "candid": "src/mock_ledger/mock_ledger.did",
-      "metadata": [
-        {
-          "name": "candid:service"
-        }
-      ]
-    },
-    "mock_usdt": {
-      "type": "rust",
-      "package": "mock_ledger",
-      "candid": "src/mock_ledger/mock_ledger.did",
-      "metadata": [
-        {
-          "name": "candid:service"
-        }
-      ]
-    },
     "test_ireits_backend": {
       "type": "rust",
       "package": "test_ireits_backend",
       "candid": "src/test_ireits_backend/test_ireits_backend.did",
       "metadata": [
         {
-          "name": "candid:service"
+          "name": "candid:service",
+          "visibility": "public"
         }
       ]
     },
     "test_ireits_frontend": {
       "type": "assets",
-      "source": ["src/test_ireits_frontend/assets", "dist/test_ireits_frontend/"],
+      "source": ["src/test_ireits_frontend/assets"],
       "dependencies": ["test_ireits_backend"],
       "metadata": [
         {
-          "name": "candid:service"
+          "name": "candid:service",
+          "visibility": "public"
         }
       ]
     }

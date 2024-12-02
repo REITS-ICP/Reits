@@ -2,16 +2,14 @@ use candid::{CandidType, Deserialize, Principal};
 use ic_cdk::api::caller as ic_caller;
 use ic_cdk::api::time;
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
-use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
-const INITIAL_SUPPLY: u64 = 5_000_000;
+const INITIAL_SUPPLY: u64 = 10_000_000;
 const MAX_SUPPLY: u64 = 20_000_000;
-const AIRDROP_ALLOCATION: u64 = INITIAL_SUPPLY / 5; // 20%
+const AIRDROP_ALLOCATION: u64 = INITIAL_SUPPLY / 2; // 50% for testing
 const MIN_STAKE_DURATION: u64 = 30 * 24 * 60 * 60 * 1_000_000_000; // 30 days in nanoseconds
 const STAKE_APR: u64 = 10; // 10% APR for staking
 
-// Token Types
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct TokenMetadata {
     pub name: String,
@@ -55,13 +53,6 @@ pub struct TransferArgs {
     pub memo: Option<Vec<u8>>,
 }
 
-#[derive(CandidType, Deserialize, Clone, Debug)]
-pub struct StakeArgs {
-    pub amount: u64,
-    pub duration: u64,
-}
-
-// State Management
 thread_local! {
     static METADATA: RefCell<Option<TokenMetadata>> = RefCell::new(None);
     static BALANCES: RefCell<HashMap<Principal, TokenHolder>> = RefCell::new(HashMap::new());
@@ -79,8 +70,12 @@ thread_local! {
 pub struct RETToken;
 
 impl RETToken {
-    pub fn initialize(owner: Principal, website: Option<String>, social_links: Option<Vec<String>>) {
+    pub fn initialize(owner: Principal, website: Option<String>, social_links: Option<Vec<String>>) -> bool {
         METADATA.with(|metadata| {
+            if metadata.borrow().is_some() {
+                return false;
+            }
+
             *metadata.borrow_mut() = Some(TokenMetadata {
                 name: "Real Estate Token".to_string(),
                 symbol: "RET".to_string(),
@@ -94,21 +89,69 @@ impl RETToken {
                 website,
                 social_links,
             });
-        });
 
-        // Initialize owner balance
-        BALANCES.with(|balances| {
-            balances.borrow_mut().insert(owner, TokenHolder {
-                balance: INITIAL_SUPPLY - AIRDROP_ALLOCATION,
-                allowances: HashMap::new(),
-                staked_balance: 0,
-                last_stake_time: None,
-                stake_duration: None,
+            // Initialize owner balance
+            BALANCES.with(|balances| {
+                balances.borrow_mut().insert(owner, TokenHolder {
+                    balance: INITIAL_SUPPLY - AIRDROP_ALLOCATION,
+                    allowances: HashMap::new(),
+                    staked_balance: 0,
+                    last_stake_time: None,
+                    stake_duration: None,
+                });
             });
-        });
+
+            true
+        })
     }
 
-    pub fn stake(amount: u64, duration: u64) -> Result<(), String> {
+    pub fn transfer(args: TransferArgs) -> Result<bool, String> {
+        let caller = ic_caller();
+        
+        if args.from != caller {
+            return Err("Not authorized".to_string());
+        }
+
+        BALANCES.with(|balances| {
+            let mut balances = balances.borrow_mut();
+            let from_holder = balances.get(&args.from)
+                .ok_or_else(|| "Sender has no balance".to_string())?;
+            
+            if from_holder.balance < args.amount {
+                return Err("Insufficient balance".to_string());
+            }
+
+            // Update sender balance
+            let mut new_from_holder = from_holder.clone();
+            new_from_holder.balance -= args.amount;
+            balances.insert(args.from, new_from_holder);
+            
+            // Update recipient balance
+            let mut to_holder = balances.get(&args.to)
+                .cloned()
+                .unwrap_or_else(|| TokenHolder {
+                    balance: 0,
+                    allowances: HashMap::new(),
+                    staked_balance: 0,
+                    last_stake_time: None,
+                    stake_duration: None,
+                });
+            
+            to_holder.balance += args.amount;
+            balances.insert(args.to, to_holder);
+            
+            // Update stats
+            STATS.with(|stats| {
+                let mut stats = stats.borrow_mut();
+                stats.total_transactions += 1;
+                stats.volume_24h += args.amount;
+            });
+
+            Ok(true)
+        })
+    }
+
+    pub fn stake(amount: u64, duration: u64) -> Result<bool, String> {
         let caller = ic_caller();
         
         if duration < MIN_STAKE_DURATION {
@@ -134,7 +177,7 @@ impl RETToken {
                 stats.total_staked += amount;
             });
 
-            Ok(())
+            Ok(true)
         })
     }
 
@@ -180,7 +223,7 @@ impl RETToken {
         })
     }
 
-    pub fn airdrop(recipients: Vec<(Principal, u64)>) -> Result<(), String> {
+    pub fn airdrop(recipients: Vec<(Principal, u64)>) -> Result<bool, String> {
         let total_amount: u64 = recipients.iter().map(|(_, amount)| amount).sum();
         
         STATS.with(|stats| {
@@ -203,9 +246,33 @@ impl RETToken {
                     holder.balance += amount;
                 });
             }
-            Ok(())
+            Ok(true)
         })
     }
 
-    // ... existing transfer and allowance methods ...
+    pub fn balance_of(owner: Principal) -> u64 {
+        BALANCES.with(|balances| {
+            balances.borrow()
+                .get(&owner)
+                .map(|holder| holder.balance)
+                .unwrap_or(0)
+        })
+    }
+
+    pub fn staked_balance_of(owner: Principal) -> u64 {
+        BALANCES.with(|balances| {
+            balances.borrow()
+                .get(&owner)
+                .map(|holder| holder.staked_balance)
+                .unwrap_or(0)
+        })
+    }
+
+    pub fn get_metadata() -> Option<TokenMetadata> {
+        METADATA.with(|metadata| metadata.borrow().clone())
+    }
+
+    pub fn get_stats() -> TokenStats {
+        STATS.with(|stats| stats.borrow().clone())
+    }
 } 

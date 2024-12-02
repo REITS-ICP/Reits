@@ -28,38 +28,11 @@ type TokenMetadata = record {
     symbol: text;
     description: opt text;
     logo: opt blob;
-    content_type: opt text;
     decimals: nat8;
-    website: opt text;
-    social_links: opt vec text;
-    supply_cap: opt nat64;
-    image: opt blob;
-    royalties: opt nat16;
-    royalty_recipient: opt principal;
-    tags: opt vec text;
-    created_at: nat64;
-    modified_at: nat64;
-};
-
-type Token = record {
-    token_id: nat64;
-    owner: principal;
-    metadata: TokenMetadata;
-    transfer_restricted: bool;
-    last_transfer: opt nat64;
-};
-
-type Collection = record {
-    name: text;
-    symbol: text;
-    description: text;
     total_supply: nat64;
-    max_supply: opt nat64;
-    royalties: nat16;
+    circulating_supply: nat64;
     owner: principal;
-    treasury: principal;
     created_at: nat64;
-    logo: opt blob;
     website: opt text;
     social_links: opt vec text;
 };
@@ -70,50 +43,19 @@ type TokenStats = record {
     market_cap: nat64;
     volume_24h: nat64;
     price_change_24h: float64;
+    total_staked: nat64;
+    total_airdropped: nat64;
 };
 
 type TransferArgs = record {
-    spender_subaccount: opt blob;
     from: principal;
     to: principal;
-    token_id: nat64;
+    amount: nat64;
     memo: opt blob;
-    created_at_time: opt nat64;
-};
-
-type ApprovalArgs = record {
-    from_subaccount: opt blob;
-    spender: principal;
-    token_id: nat64;
-    expires_at: opt nat64;
-    memo: opt blob;
-    created_at_time: opt nat64;
 };
 
 service : {
-    // Property Management
-    list_property: (price: float64, location: text, description: text, rental_income: opt RentalIncome) -> (Property);
-    get_property: (property_id: nat64) -> (opt Property) query;
-    get_all_properties: () -> (vec Property) query;
-    get_user_properties: (user: principal) -> (vec Property) query;
-    add_document: (property_id: nat64, doc_type: variant { Deed; Title; Contract; Inspection; Other }, hash: text) -> (bool);
-    
-    // Token Management (ICRC-7)
-    name: () -> (text) query;
-    symbol: () -> (text) query;
-    total_supply: () -> (nat64) query;
-    owner_of: (token_id: nat64) -> (opt principal) query;
-    balance_of: (owner: principal) -> (nat64) query;
-    transfer: (TransferArgs) -> (variant { Ok: bool; Err: text });
-    approve: (ApprovalArgs) -> (variant { Ok: bool; Err: text });
-    get_approved: (token_id: nat64) -> (opt record { principal; opt nat64 }) query;
-    get_metadata: (token_id: nat64) -> (opt TokenMetadata) query;
-    get_token: (token_id: nat64) -> (opt Token) query;
-    get_collection_info: () -> (opt Collection) query;
-    get_token_stats: (token_id: nat64) -> (opt TokenStats) query;
-    get_user_tokens: (user: principal) -> (vec Token) query;
-    
-    // Property Token Management
+    // Collection Management
     initialize_collection: (
         name: text,
         symbol: text,
@@ -125,16 +67,41 @@ service : {
         website: opt text,
         social_links: opt vec text
     ) -> (bool);
+
+    // Property Management
+    list_property: (price: float64, location: text, description: text, rental_income: opt RentalIncome) -> (Property);
+    get_property: (property_id: nat64) -> (opt Property) query;
+    get_all_properties: () -> (vec Property) query;
+    get_user_properties: (user: principal) -> (vec Property) query;
+    add_document: (property_id: nat64, doc_type: variant { Deed; Title; Contract; Inspection; Other }, hash: text) -> (bool);
+    
+    // Property Tokenization
     tokenize_property: (
         property_id: nat64,
-        token_name: text,
-        token_symbol: text,
-        token_description: opt text,
+        name: text,
+        symbol: text,
+        description: opt text,
         total_supply: nat64,
-        price_per_token: nat64,
-        royalties: opt nat16
-    ) -> (opt nat64);
+        available_supply: nat64,
+        royalty_percentage: opt nat16
+    ) -> (variant { Ok: bool; Err: text });
+
+    fractionalize_property: (
+        property_id: nat64,
+        shares: vec record { principal; nat16 }
+    ) -> (variant { Ok: bool; Err: text });
+
+    // RET Token Management
+    initialize_ret: (owner: principal, website: opt text, social_links: opt vec text) -> (bool);
+    get_ret_metadata: () -> (opt TokenMetadata) query;
+    balance_of: (owner: principal) -> (nat64) query;
+    staked_balance_of: (owner: principal) -> (nat64) query;
+    stake: (amount: nat64, duration: nat64) -> (variant { Ok: bool; Err: text });
+    unstake: () -> (variant { Ok: nat64; Err: text });
+    transfer: (TransferArgs) -> (variant { Ok: bool; Err: text });
+    airdrop_ret: (recipients: vec record { principal; nat64 }) -> (variant { Ok: bool; Err: text });
+    get_ret_stats: () -> (TokenStats) query;
     
     // Payment Management
-    initialize_payment_manager: (ckusdc_id: principal, ckusdt_id: principal) -> ();
+    initialize_payment_manager: (ret_ledger: principal) -> ();
 };
